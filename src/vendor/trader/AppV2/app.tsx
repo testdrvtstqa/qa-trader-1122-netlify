@@ -1,0 +1,95 @@
+import React from 'react';
+import { when } from 'mobx';
+
+import { ReportsStoreProvider } from '@deriv/reports/src/Stores/useReportsStores';
+import { trackAnalyticsEvent } from '@deriv/shared';
+import type { TCoreStores } from '@deriv/stores/types';
+import { NotificationsProvider, SnackbarProvider } from '@deriv-com/quill-ui';
+
+import initStore from '@trader/Stores/init-store';
+import ModulesProvider from '@trader/Stores/Providers/modules-providers';
+import type { TWebSocket } from '@trader/Types';
+
+import EnvVarsCheckSnackbar from '@/components/env-vars-check-snackbar';
+
+import TraderProviders from '../trader-providers';
+
+import AutomationStopSnackbar from './Components/AutomationPanel/automation-stop-snackbar';
+import ServicesErrorSnackbar from './Components/ServicesErrorSnackbar';
+import AppShell from './Containers/AppShell/app-shell';
+import Notifications from './Containers/Notifications';
+
+import '@trader/Sass/app.scss';
+
+type Apptypes = {
+    passthrough: {
+        root_store: TCoreStores;
+        WS: TWebSocket;
+    };
+};
+
+const App = ({ passthrough }: Apptypes) => {
+    const root_store = initStore(passthrough.root_store, passthrough.WS);
+    const analyticsCalledRef = React.useRef(false);
+
+    React.useEffect(() => {
+        return () => root_store.ui.setPromptHandler(false);
+    }, [root_store]);
+
+    React.useEffect(() => {
+        // Prevent duplicate analytics calls if component remounts
+        if (analyticsCalledRef.current) {
+            return;
+        }
+
+        // Wait for auth to resolve before firing the event so account_type is correct.
+        // For non-logged-in users, is_logging_in is already false so when() fires immediately.
+        // For logged-in users, is_logging_in is true until auth completes.
+        const dispose = when(
+            () => !root_store.client.is_logging_in,
+            () => {
+                analyticsCalledRef.current = true;
+                trackAnalyticsEvent('ce_dtrader_app_v2', {
+                    action: 'open',
+                });
+            }
+        );
+
+        return dispose;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    React.useLayoutEffect(() => {
+        const head = document.head;
+        const links = head.querySelectorAll('link[rel="stylesheet"]');
+        const is_last_dtrader = (links[links.length - 1] as HTMLLinkElement)?.href?.includes('/trader');
+        const dtrader_links = [...links].filter(link => (link as HTMLLinkElement)?.href?.includes('/trader'));
+
+        if (is_last_dtrader) return;
+
+        const dtrader_links_clone = dtrader_links?.map(link => link?.cloneNode(true));
+        dtrader_links_clone.forEach(link => head.appendChild(link));
+
+        return () => dtrader_links_clone?.forEach(link => head.removeChild(link));
+    }, []);
+
+    return (
+        <TraderProviders store={root_store}>
+            <ReportsStoreProvider>
+                <ModulesProvider store={root_store}>
+                    <NotificationsProvider>
+                        <SnackbarProvider>
+                            <Notifications />
+                            <AppShell />
+                            <ServicesErrorSnackbar />
+                            <AutomationStopSnackbar />
+                            <EnvVarsCheckSnackbar />
+                        </SnackbarProvider>
+                    </NotificationsProvider>
+                </ModulesProvider>
+            </ReportsStoreProvider>
+        </TraderProviders>
+    );
+};
+
+export default App;

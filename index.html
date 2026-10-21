@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" dir="auto" class="light">
+    <head>
+        <meta charset="UTF-8" />
+        <!-- No static favicon: the runtime sets the partner logo or a letter badge, and
+             replaces the document title with the partner app name on boot
+             (src/utils/document-branding.ts). -->
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+        <meta name="title" content="Trader" />
+        <meta
+            name="description"
+            content="A full-featured derivatives trading terminal with live charts, streaming prices, and one-click contract execution."
+        />
+        <meta property="og:title" content="Trader" />
+        <meta
+            property="og:description"
+            content="A full-featured derivatives trading terminal with live charts, streaming prices, and one-click contract execution."
+        />
+        <title>Trader</title>
+        <style>
+            :root {
+                font-size: 62.5%;
+            }
+        </style>
+    </head>
+
+    <body class="body theme theme--light">
+        <div id="modal_root" class="modal-root"></div>
+        <div id="popup_root" class="popup-root"></div>
+        <div id="root"></div>
+        <div id="derivatives_trader"></div>
+    </body>
+</html>

@@ -1,0 +1,694 @@
+import Cookies from 'js-cookie';
+import { action, computed, makeObservable, observable, reaction, runInAction, when } from 'mobx';
+
+import {
+    clearAccountId,
+    dayjs,
+    filterUrlQuery,
+    getAccountId,
+    getAccountType,
+    getTrustedDomainName,
+    isCryptocurrency,
+    isMobile,
+    LocalStore,
+    removeCookies,
+    routes,
+    SessionStore,
+    urlForLanguage,
+} from '@deriv/shared';
+import { Analytics } from '@deriv-com/analytics';
+import { getInitialLanguage, localize } from '@deriv-com/translations';
+import { CountryUtils } from '@deriv-com/utils';
+
+import { logout as clearOAuthSession } from '@/external/deriv-core';
+import { hasOAuthSession } from '@/utils/auth-session';
+import { checkWhoAmI, requestRestLogout, WS } from '@core/Services';
+
+import { getClientAccountType } from './Helpers/client';
+import { buildCurrenciesList } from './Modules/Trading/Helpers/currency';
+import BaseStore from './base-store';
+
+import BinarySocket from '@core/_common/base/socket_base';
+import { getRegion, isMultipliersOnly, isOptionsBlocked } from '@core/_common/utility';
+
+const LANGUAGE_KEY = 'i18n_language';
+const storage_key = 'current_account';
+const store_name = 'client_store';
+
+export default class ClientStore extends BaseStore {
+    loginid;
+    preferred_language;
+    email;
+    user_id;
+    external_id;
+
+    current_account = null;
+    initialized_broadcast = false;
+    is_authorize = false;
+    is_logging_in = false;
+    is_client_store_initialized = false;
+    has_logged_out = false;
+    should_redirect_user_to_login = false;
+
+    currencies_list = {};
+    selected_currency = '';
+
+    has_cookie_account = false;
+    tab_visibility_handler = null;
+    has_archived_statement = false;
+
+    constructor(root_store) {
+        const local_storage_properties = [];
+        super({ root_store, local_storage_properties, store_name });
+
+        makeObservable(this, {
+            loginid: observable,
+            preferred_language: observable,
+            email: observable,
+            user_id: observable,
+            current_account: observable,
+            initialized_broadcast: observable,
+            currencies_list: observable,
+            selected_currency: observable,
+            is_authorize: observable,
+            is_logging_in: observable,
+            is_client_store_initialized: observable,
+            has_logged_out: observable,
+            should_redirect_user_to_login: observable,
+            has_cookie_account: observable,
+            has_archived_statement: observable,
+
+            balance: computed,
+            currency: computed,
+            is_virtual: computed,
+            is_eu: computed,
+            is_logged_in: computed,
+            account_type: computed,
+            default_currency: computed,
+            residence: computed,
+            email_address: computed,
+            landing_company_shortcode: computed,
+
+            is_cr_account: computed,
+            is_mf_account: computed,
+            is_options_blocked: computed,
+            is_multipliers_only: computed,
+
+            has_active_real_account: computed,
+            has_any_real_account: computed,
+            is_single_currency: computed,
+
+            setPreferredLanguage: action.bound,
+            setCookieAccount: action.bound,
+            responsePayoutCurrencies: action.bound,
+            responseAuthorize: action.bound,
+            setLoginId: action.bound,
+            setIsAuthorize: action.bound,
+            setIsLoggingIn: action.bound,
+            setBalanceActiveAccount: action.bound,
+            selectCurrency: action.bound,
+            setEmail: action.bound,
+            setInitialized: action.bound,
+            setIsClientStoreInitialized: action.bound,
+            cleanUp: action.bound,
+            logout: action.bound,
+            setLogout: action.bound,
+            setShouldRedirectToLogin: action.bound,
+            setHasArchivedStatement: action.bound,
+            init: action.bound,
+            resetVirtualBalance: action.bound,
+            is_crypto: action.bound,
+            switchAccount: action.bound,
+        });
+
+        reaction(
+            () => [this.is_logged_in, this.loginid, this.email, this.currency, this.preferred_language],
+            () => {
+                this.setCookieAccount();
+            }
+        );
+
+        when(
+            () => !this.is_logged_in && this.root_store.ui && this.root_store.ui.is_real_acc_signup_on,
+            () => this.root_store.ui.closeRealAccountSignup()
+        );
+    }
+
+    get balance() {
+        if (this.current_account?.balance !== undefined && this.current_account?.balance !== null) {
+            return this.current_account.balance.toString();
+        }
+        return undefined;
+    }
+
+    get has_active_real_account() {
+        return !this.is_virtual;
+    }
+
+    get has_any_real_account() {
+        return !this.is_virtual;
+    }
+
+    get currency() {
+        if (this.selected_currency.length) {
+            return this.selected_currency;
+        }
+        return this.current_account?.currency || this.default_currency;
+    }
+
+    is_crypto(currency) {
+        return isCryptocurrency(currency || this.currency);
+    }
+
+    get default_currency() {
+        if (Object.keys(this.currencies_list).length > 0) {
+            const keys = Object.keys(this.currencies_list);
+            if (this.currencies_list[localize('Fiat')]?.length < 1) return 'USD';
+            return Object.values(this.currencies_list[`${keys[0]}`])[0].text;
+        }
+        return 'USD';
+    }
+
+    get is_logged_in() {
+        const hasAccountId = !!getAccountId();
+        const hasCurrentAccountLoginId = !!this.current_account?.loginid;
+        const hasLoginId = !!this.loginid;
+        return hasAccountId && hasCurrentAccountLoginId && hasLoginId;
+    }
+
+    get is_virtual() {
+        // Reference loginid to make this computed reactive to account switches
+        this.loginid;
+        return getAccountType() === 'demo';
+    }
+
+    get is_eu() {
+        return this.landing_company_shortcode === 'maltainvest';
+    }
+
+    get account_type() {
+        return getClientAccountType(this.loginid);
+    }
+
+    get residence() {
+        return this.current_account?.residence || '';
+    }
+
+    get email_address() {
+        return this.current_account?.email || '';
+    }
+
+    get landing_company_shortcode() {
+        // Default to 'svg' for ROW behavior (maximum permissiveness)
+        return this.current_account?.landing_company_shortcode || 'svg';
+    }
+
+    get is_cr_account() {
+        return this.loginid?.startsWith('CR');
+    }
+
+    get is_mf_account() {
+        return this.loginid?.startsWith('MF');
+    }
+
+    get is_options_blocked() {
+        return isOptionsBlocked(this.residence);
+    }
+
+    get is_multipliers_only() {
+        return isMultipliersOnly(this.residence);
+    }
+
+    get is_single_currency() {
+        return true; // Simplified for single account
+    }
+
+    setIsAuthorize(value) {
+        this.is_authorize = value;
+    }
+
+    setPreferredLanguage = lang => {
+        this.preferred_language = lang;
+        LocalStore.setObject(LANGUAGE_KEY, lang);
+    };
+
+    setCookieAccount() {
+        const domain = getTrustedDomainName();
+
+        const { loginid, landing_company_shortcode, currency, preferred_language, user_id } = this;
+        const email = this.email;
+        const residence = this.residence;
+
+        if (loginid && email) {
+            const client_information = {
+                loginid,
+                email,
+                landing_company_shortcode,
+                currency,
+                residence,
+                preferred_language,
+                user_id,
+            };
+            Cookies.set('region', getRegion(landing_company_shortcode, residence), { domain });
+            // js-cookie v3 no longer auto-serializes objects (v2 did); stringify explicitly so readers (e.g. analytics) can JSON.parse it
+            Cookies.set('client_information', JSON.stringify(client_information), { domain });
+            this.has_cookie_account = true;
+        } else {
+            removeCookies('region', 'client_information');
+            this.has_cookie_account = false;
+        }
+    }
+
+    responsePayoutCurrencies(response) {
+        // Since payout_currencies endpoint has been removed, use USD as fallback
+        const list = response?.payout_currencies || response || ['USD'];
+        this.currencies_list = buildCurrenciesList(Array.isArray(list) ? list : ['USD']);
+        this.selectCurrency('');
+    }
+
+    responseAuthorize(response) {
+        const { authorize } = response;
+
+        runInAction(() => {
+            this.current_account = {
+                loginid: authorize.loginid,
+                balance: authorize.balance,
+                currency: authorize.currency,
+                email: authorize.email || '',
+                landing_company_shortcode: authorize.landing_company_name || '',
+                residence: authorize.country || '',
+                session_start: parseInt(dayjs().utc().valueOf() / 1000),
+            };
+
+            this.setLoginId(authorize.loginid);
+        });
+
+        this.user_id = authorize.user_id || '';
+        if (this.user_id) {
+            localStorage.setItem('active_user_id', this.user_id);
+        }
+
+        // Store active_loginid for backward compatibility with notification system and multi-tab sync
+        localStorage.setItem('active_loginid', authorize.loginid);
+        sessionStorage.setItem('active_loginid', authorize.loginid);
+
+        // Store current account
+        localStorage.setItem(storage_key, JSON.stringify(this.current_account));
+    }
+
+    async resetVirtualBalance() {
+        this.root_store.notifications.removeNotificationByKey({ key: 'reset_virtual_balance' });
+        this.root_store.notifications.removeNotificationMessage({
+            key: 'reset_virtual_balance',
+            should_show_again: true,
+        });
+        await WS.authorized.topupVirtual();
+    }
+
+    async init(external_id) {
+        // Remove any legacy token parameters from URL
+        this.removeTokenFromUrl();
+
+        let search = '';
+        try {
+            search = SessionStore?.get?.('signup_query_param') || window?.location?.search || '';
+        } catch (error) {
+            search = '';
+        }
+
+        const search_params = new URLSearchParams(search);
+        const redirect_url = search_params?.get('redirect_url');
+        const action_param = search_params?.get('action');
+        const loginid_param = search_params?.get('loginid');
+
+        const account_id = getAccountId();
+
+        if (account_id) {
+            // Set is_logging_in to true while we wait for authorization
+            this.setIsLoggingIn(true);
+
+            // Wait for balance response which serves as authorization
+            // socket-general.js will handle the balance response and call authorizeAccount()
+            try {
+                await BinarySocket.wait('balance');
+            } catch (error) {
+                // eslint-disable-next-line no-console
+                console.error('[Auth] Balance timeout:', error);
+                // Clear invalid credentials and retry as public
+                clearAccountId();
+                localStorage.removeItem('account_type');
+            }
+        }
+
+        // Handle special action parameters and user_id for both logged-in and logged-out states
+        if (
+            ['crypto_transactions_withdraw', 'payment_withdraw', 'payment_agent_withdraw'].includes(action_param) &&
+            loginid_param
+        ) {
+            this.setLoginId(loginid_param);
+        } else {
+            this.setLoginId(window.sessionStorage.getItem('active_loginid') || LocalStore.get('active_loginid'));
+        }
+
+        this.user_id = LocalStore.get('active_user_id');
+
+        // Load current account from localStorage if not already set
+        if (!this.current_account) {
+            const stored_account = LocalStore.getObject(storage_key);
+            if (stored_account) {
+                this.current_account = stored_account;
+            }
+        }
+
+        this.external_id = external_id;
+
+        // Analytics and GTM for logged-in users
+        if (this.is_logged_in) {
+            Analytics.identifyEvent(external_id || this.user_id);
+
+            await this.root_store.gtm.pushDataLayer({
+                event: 'login',
+            });
+        }
+
+        // Handle redirect and language settings for logged-in users
+        if (this.is_logged_in) {
+            if (redirect_url) {
+                const redirect_route = routes[redirect_url].length > 1 ? routes[redirect_url] : '';
+                const has_action = [
+                    'crypto_transactions_withdraw',
+                    'payment_agent_withdraw',
+                    'payment_withdraw',
+                    'reset_password',
+                ].includes(action_param);
+
+                if (has_action) {
+                    const query_string = filterUrlQuery(search, ['platform', 'code', 'action', 'loginid']);
+                    window.location.replace(`${redirect_route}/redirect?${query_string}`);
+                } else {
+                    window.location.replace(`${redirect_route}/?${filterUrlQuery(search, ['platform', 'lang'])}`);
+                }
+            }
+
+            const language = this.current_account?.preferred_language || getInitialLanguage();
+            const stored_language_without_double_quotes = LocalStore.get(LANGUAGE_KEY).replace(/"/g, '');
+            if (stored_language_without_double_quotes && language !== stored_language_without_double_quotes) {
+                window.history.replaceState({}, document.title, urlForLanguage(language));
+                await this.root_store.common.changeSelectedLanguage(language);
+            }
+        }
+
+        this.selectCurrency('');
+
+        // Since payout_currencies endpoint has been removed, use USD as default
+        this.responsePayoutCurrencies(['USD']);
+
+        this.setIsLoggingIn(false);
+        this.setInitialized(true);
+
+        // Clean up URL parameters
+        if (action_param === 'signup') {
+            const filteredQuery = filterUrlQuery(search, ['lang']);
+            history.replaceState(
+                null,
+                null,
+                window.location.href.replace(`${search}`, filteredQuery === '' ? '' : `?${filteredQuery}`)
+            );
+        }
+
+        this.setIsClientStoreInitialized();
+
+        // Set up visibility change listener to check whoami when tab becomes visible
+        this.setupVisibilityListener();
+
+        return true;
+    }
+
+    /**
+     * Checks session validity via whoami service and handles cleanup if needed
+     */
+    async handleWhoAmI() {
+        const result = await checkWhoAmI();
+
+        // Only trigger cleanup if we get 401 error AND have account_id (expect to be logged in)
+        // This means user logged out from Deriv home. If no account_id, we're on public - ignore 401
+        // White-label OAuth sessions are Bearer-token based (shell OAuth seam), not
+        // Ory-cookie based — a cookieless whoami 401 must not wipe an OAuth session,
+        // whether or not its access token is currently within its lifetime.
+        if (result.error?.code === 401 && getAccountId() && !hasOAuthSession()) {
+            await this.cleanUp();
+        }
+    }
+
+    /**
+     * Sets up visibility change and focus listeners to check whoami when tab becomes visible or gains focus
+     */
+    setupVisibilityListener() {
+        // Remove existing listeners if any
+        this.removeVisibilityListener();
+
+        // Create visibility change handler
+        this.tab_visibility_handler = () => {
+            if (document.visibilityState === 'visible') {
+                // Tab became visible - check whoami
+                this.handleWhoAmI();
+            }
+        };
+
+        // Create focus handler
+        this.window_focus_handler = () => {
+            // Window gained focus - check whoami
+            this.handleWhoAmI();
+        };
+
+        // Add listeners
+        document.addEventListener('visibilitychange', this.tab_visibility_handler);
+        window.addEventListener('focus', this.window_focus_handler);
+    }
+
+    /**
+     * Removes the visibility change and focus listeners
+     */
+    removeVisibilityListener() {
+        if (this.tab_visibility_handler) {
+            document.removeEventListener('visibilitychange', this.tab_visibility_handler);
+            this.tab_visibility_handler = null;
+        }
+        if (this.window_focus_handler) {
+            window.removeEventListener('focus', this.window_focus_handler);
+            this.window_focus_handler = null;
+        }
+    }
+
+    setLoginId(loginid) {
+        this.loginid = loginid;
+    }
+
+    async getAnalyticsConfig(isLoggedOut = false) {
+        const broker = this.loginid?.match(/[a-zA-Z]+/g)?.join('');
+
+        // js-cookie v3 removed Cookies.getJSON(); replicate its v2 behavior (parse JSON, fall back to the raw string on failure)
+        const utm_data_cookie = Cookies.get('utm_data');
+        let utm_data;
+        try {
+            utm_data = utm_data_cookie === undefined ? undefined : JSON.parse(utm_data_cookie);
+        } catch (e) {
+            utm_data = utm_data_cookie;
+        }
+        const ppc_campaign_cookies =
+            utm_data === 'null'
+                ? {
+                      utm_source: 'no source',
+                      utm_medium: 'no medium',
+                      utm_campaign: 'no campaign',
+                      utm_content: 'no content',
+                  }
+                : utm_data;
+
+        const residence_country = !isLoggedOut ? this.residence : '';
+        const login_status = !isLoggedOut && this.is_logged_in;
+        return {
+            loggedIn: login_status,
+            account_type: broker === 'null' ? 'unlogged' : broker,
+            residence_country,
+            device_type: isMobile() ? 'mobile' : 'desktop',
+            language: getInitialLanguage(),
+            device_language: navigator?.language || 'en-EN',
+            user_language: getInitialLanguage().toLowerCase(),
+            country: await CountryUtils.getCountry(),
+            utm_source: ppc_campaign_cookies?.utm_source,
+            utm_medium: ppc_campaign_cookies?.utm_medium,
+            utm_campaign: ppc_campaign_cookies?.utm_campaign,
+            utm_content: ppc_campaign_cookies?.utm_content,
+            domain: window.location.hostname,
+            url: window.location.href,
+            ...(!isLoggedOut && this.external_id && { user_id: this.external_id }),
+        };
+    }
+
+    setIsLoggingIn(bool) {
+        this.is_logging_in = bool;
+    }
+
+    setBalanceActiveAccount(obj_balance) {
+        if (!obj_balance || typeof obj_balance.balance === 'undefined') {
+            return;
+        }
+
+        if (this.current_account && obj_balance.loginid === this.current_account.loginid) {
+            this.current_account.balance = obj_balance.balance;
+
+            if (this.is_virtual) {
+                this.root_store.notifications.resetVirtualBalanceNotification(this.current_account.loginid);
+            }
+
+            // Update localStorage
+            localStorage.setItem(storage_key, JSON.stringify(this.current_account));
+        }
+    }
+
+    selectCurrency(value) {
+        this.selected_currency = value;
+    }
+
+    setEmail(email) {
+        if (this.current_account) {
+            this.current_account.email = email;
+            this.email = email;
+        }
+    }
+
+    setIsClientStoreInitialized() {
+        this.is_client_store_initialized = true;
+    }
+
+    setInitialized(is_initialized) {
+        this.initialized_broadcast = is_initialized;
+    }
+
+    async cleanUp() {
+        // Remove visibility listener
+        this.removeVisibilityListener();
+
+        // Clean up notifications
+        const notification_messages = LocalStore.getObject('notification_messages');
+        if (notification_messages && this.loginid) {
+            delete notification_messages[this.loginid];
+            LocalStore.setObject('notification_messages', { ...notification_messages });
+        }
+
+        // Update analytics
+        const analytics_config = await this.getAnalyticsConfig(true);
+        Analytics.setAttributes(analytics_config);
+
+        this.root_store.gtm.pushDataLayer({ event: 'log_out' });
+
+        // Reset state
+        this.loginid = null;
+        this.user_id = null;
+        this.external_id = null;
+        this.current_account = null;
+        this.setHasArchivedStatement(false);
+
+        LocalStore.set('marked_notifications', JSON.stringify([]));
+        localStorage.setItem('active_loginid', this.loginid);
+        sessionStorage.removeItem('active_loginid');
+        localStorage.setItem('active_user_id', this.user_id);
+        localStorage.setItem(storage_key, JSON.stringify(this.current_account));
+
+        // Clear account_id and account_type from localStorage
+        clearAccountId();
+        localStorage.removeItem('account_type');
+
+        // Remove the shared `options_account_id` cookie before reconnecting.
+        removeCookies('options_account_id');
+
+        Analytics.reset();
+
+        runInAction(() => {
+            // Since payout_currencies endpoint has been removed, use USD as default
+            this.responsePayoutCurrencies(['USD']);
+        });
+        this.root_store.notifications.removeAllNotificationMessages(true);
+
+        // Drop WebSocket connection and reconnect to public endpoint
+        BinarySocket.closeAndOpenNewConnection();
+    }
+
+    setShouldRedirectToLogin(should_redirect_user_to_login) {
+        this.should_redirect_user_to_login = should_redirect_user_to_login;
+    }
+
+    setHasArchivedStatement(has_archived_statement) {
+        this.has_archived_statement = has_archived_statement;
+    }
+
+    async logout() {
+        // White-label OAuth sessions have no Ory session to terminate (and the
+        // REST logout endpoint is cross-origin-blocked on partner domains) —
+        // clear the token session locally instead.
+        if (hasOAuthSession()) {
+            clearOAuthSession();
+            localStorage.removeItem('account_id');
+            localStorage.removeItem('account_type');
+            await this.cleanUp();
+            this.setLogout(true);
+            return { logout: 1 };
+        }
+
+        const response = await requestRestLogout();
+
+        if (response?.logout === 1) {
+            await this.cleanUp();
+            this.setLogout(true);
+        }
+
+        return response;
+    }
+
+    setLogout(is_logged_out) {
+        this.has_logged_out = is_logged_out;
+        if (this.root_store.common.has_error) this.root_store.common.setError(false, null);
+    }
+
+    removeTokenFromUrl() {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('token')) {
+            url.searchParams.delete('token');
+            window.history.replaceState({}, document.title, url.toString());
+        }
+    }
+
+    /**
+     * Switch to a different account
+     * Handles notification clearing, localStorage updates, and WebSocket reconnection
+     * @param {string} account_id - The account ID to switch to
+     * @param {'real' | 'demo'} account_type - The account type
+     */
+    async switchAccount(account_id, account_type) {
+        if (!account_id || this.loginid === account_id) return;
+
+        // Update localStorage with new account
+        localStorage.setItem('account_id', account_id);
+        localStorage.setItem('account_type', account_type);
+        localStorage.setItem('active_loginid', account_id);
+        sessionStorage.setItem('active_loginid', account_id);
+
+        // Clear notifications when switching accounts (similar to old implementation)
+        this.root_store.notifications.removeNotifications(true);
+        this.root_store.notifications.removeTradeNotifications();
+        this.root_store.notifications.removeAllNotificationMessages(true);
+
+        // Clear contract markers to prevent showing previous account's contracts on chart
+        this.root_store.contract_trade.clearContracts();
+
+        // Clear stale positions immediately so previous account's positions
+        // are not visible while the new account's data loads
+        this.root_store.portfolio.clearTable();
+
+        // Reconnect WebSocket with new account. No prefetch is needed first:
+        // the reconnect mints its own one-time authenticated URL, and it does
+        // so after the account keys set above, so it mints for the new account.
+        BinarySocket.closeAndOpenNewConnection();
+    }
+}

@@ -1,0 +1,156 @@
+import React from 'react';
+import clsx from 'clsx';
+import { observer } from 'mobx-react-lite';
+
+import { Skeleton } from '@deriv/components';
+import { CONTRACT_TYPES, getGrowthRatePercentage, isEmptyObject, isMobile } from '@deriv/shared';
+import { ActionSheet, TextField } from '@deriv-com/quill-ui';
+import { Localize } from '@deriv-com/translations';
+
+import Carousel from '@trader/AppV2/Components/Carousel';
+import CarouselHeader from '@trader/AppV2/Components/Carousel/carousel-header';
+import TradeParamDefinition from '@trader/AppV2/Components/TradeParamDefinition';
+import { isSmallScreen } from '@trader/AppV2/Utils/trade-params-utils';
+import { useTraderStore } from '@trader/Stores/useTraderStores';
+
+import { TTradeParametersProps } from '../trade-parameters';
+
+import GrowthRateDesktop from './growth-rate-desktop';
+import GrowthRatePicker from './growth-rate-picker';
+
+const GrowthRate = observer(({ is_minimized }: TTradeParametersProps) => {
+    const {
+        accumulator_range_list,
+        growth_rate,
+        is_purchase_enabled,
+        is_trade_enabled,
+        is_market_closed,
+        has_open_accu_contract,
+        maximum_ticks,
+        onChange,
+        proposal_info,
+        setV2ParamsInitialValues,
+        tick_size_barrier_percentage,
+        v2_params_initial_values,
+    } = useTraderStore();
+
+    const [is_open, setIsOpen] = React.useState(false);
+    const [carousel_index, setCarouselIndex] = React.useState(0);
+    const is_mobile = isMobile();
+    const is_small_screen = isSmallScreen();
+    const info = proposal_info?.[CONTRACT_TYPES.ACCUMULATOR] || {};
+    const is_proposal_data_available =
+        is_trade_enabled && !isEmptyObject(proposal_info) && !!info.id && is_purchase_enabled;
+    const classname = clsx('trade-params__option', is_minimized && 'trade-params__option--minimized');
+
+    const handleGrowthRateChange = (rate: number) => {
+        onChange({ target: { name: 'growth_rate', value: rate } });
+    };
+    const onActionSheetClose = React.useCallback(() => {
+        setIsOpen(false);
+        setCarouselIndex(0);
+    }, []);
+
+    const action_sheet_content = [
+        {
+            id: 1,
+            component: (
+                <GrowthRatePicker
+                    accumulator_range_list={accumulator_range_list}
+                    maximum_ticks={maximum_ticks}
+                    growth_rate={growth_rate}
+                    onDetailClick={setCarouselIndex}
+                    setGrowthRate={handleGrowthRateChange}
+                    setV2ParamsInitialValues={setV2ParamsInitialValues}
+                    should_show_details={is_proposal_data_available}
+                    tick_size_barrier_percentage={tick_size_barrier_percentage}
+                />
+            ),
+        },
+        {
+            id: 2,
+            component: (
+                <TradeParamDefinition
+                    description={
+                        <Localize i18n_default_text='The growth rate determines the rate at which your stake will grow with each successful tick.' />
+                    }
+                />
+            ),
+        },
+        {
+            id: 3,
+            component: (
+                <TradeParamDefinition
+                    description={
+                        <Localize i18n_default_text='The price range within which the spot price must remain at each tick for your payout to keep growing. If the price moves outside this range, your contract is terminated.' />
+                    }
+                />
+            ),
+        },
+        {
+            id: 4,
+            component: (
+                <TradeParamDefinition
+                    description={
+                        <Localize i18n_default_text='Your contract will be automatically closed upon reaching this number of ticks.' />
+                    }
+                />
+            ),
+        },
+    ];
+
+    React.useEffect(() => {
+        const initial_growth_rate = v2_params_initial_values?.growth_rate;
+        if (initial_growth_rate && growth_rate !== initial_growth_rate) handleGrowthRateChange(initial_growth_rate);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    if (!growth_rate)
+        return (
+            <div className={classname}>
+                <Skeleton />
+            </div>
+        );
+    // Render desktop version with InputPopover for non-mobile devices
+    if (!is_mobile) {
+        return <GrowthRateDesktop is_minimized={is_minimized} />;
+    }
+
+    // Render mobile version with ActionSheet (unchanged)
+    return (
+        <>
+            <TextField
+                className={classname}
+                disabled={has_open_accu_contract || is_market_closed}
+                label={
+                    <Localize i18n_default_text='Growth rate' key={`growth-rate${is_minimized ? '-minimized' : ''}`} />
+                }
+                onClick={() => setIsOpen(true)}
+                readOnly
+                value={`${getGrowthRatePercentage(growth_rate)}%`}
+                variant='fill'
+            />
+            <ActionSheet.Root
+                isOpen={is_open}
+                onClose={onActionSheetClose}
+                position='left'
+                expandable={false}
+                shouldBlurOnClose={is_open}
+            >
+                <ActionSheet.Portal shouldCloseOnDrag>
+                    <Carousel
+                        classname={clsx('growth-rate__carousel', is_small_screen && 'growth-rate__carousel--small')}
+                        header={CarouselHeader}
+                        current_index={carousel_index}
+                        setCurrentIndex={setCarouselIndex}
+                        onPreviousButtonClick={() => setCarouselIndex(0)}
+                        pages={action_sheet_content}
+                        title={<Localize i18n_default_text='Growth rate' />}
+                    />
+                </ActionSheet.Portal>
+            </ActionSheet.Root>
+        </>
+    );
+});
+
+export default GrowthRate;

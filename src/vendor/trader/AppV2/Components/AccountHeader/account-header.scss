@@ -1,0 +1,126 @@
+.account-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: relative;
+    gap: 3rem;
+
+    &--loading {
+        margin-left: 1.6rem;
+    }
+
+    // Logged-out Log in / Sign up pair sits 8px apart, matching the gap-2
+    // spacing of the Next.js templates' shared header.
+    &--logged-out {
+        gap: 0.8rem;
+    }
+
+    &__container {
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        min-width: 0;
+
+        &--highlighted {
+            z-index: 10001;
+            position: relative;
+            background: var(--color-interactive-hover);
+            border-radius: 8px;
+        }
+    }
+
+    &__info {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        flex: 1;
+        min-width: 0;
+        cursor: pointer;
+
+        &--no-switcher {
+            cursor: default;
+        }
+    }
+
+    &__icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    &__content {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        min-width: 14.25rem;
+        padding: 0.7rem 1.6rem;
+        border-radius: 8px;
+    }
+
+    &__content-header {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        // "Demo account" / "Real account" must stay on one line. Without this the
+        // label wrapped while the balance below it (already nowrap) did not, so
+        // the header grew to two lines whenever something narrowed the available
+        // width — e.g. opening the Positions flyout. The chevron is a flex
+        // sibling, so nowrap keeps label + arrow on the same row too.
+        white-space: nowrap;
+    }
+
+    &__balance {
+        white-space: nowrap;
+    }
+
+    /* Mirrors the bot's logged-out pair: outlined Log in + brand-filled Sign up */
+    &__login {
+        // --color-surface-border is only 6% black in light theme, which is
+        // invisible against the white header. --color-interactive-default is
+        // the token for "default borders, dividers" (used by input, select,
+        // date-picker) and reads clearly in both themes.
+        border: 1px solid var(--color-interactive-default);
+        border-radius: 24px;
+        transition: opacity 0.2s ease;
+        margin-left: 2rem;
+
+        &:hover {
+            opacity: 0.8;
+        }
+
+        &:active {
+            opacity: 0.6;
+        }
+    }
+
+    &__signup {
+        background-color: var(--color-button-primary-bg);
+        border-radius: 24px;
+        transition: opacity 0.2s ease;
+
+        &:hover {
+            opacity: 0.8;
+        }
+
+        &:active {
+            opacity: 0.6;
+        }
+    }
+
+    &__transfer {
+        background: var(--color-button-primary-bg);
+        border-radius: 24px;
+    }
+
+    &__select-arrow {
+        pointer-events: none;
+        transform: rotate(0);
+        transform-origin: 50% 45%;
+        transition: transform 0.3s cubic-bezier(0.25, 0.1, 0.25, 1);
+
+        &--invert {
+            transform: rotate(180deg);
+        }
+    }
+}

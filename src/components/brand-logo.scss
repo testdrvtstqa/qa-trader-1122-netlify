@@ -1,0 +1,38 @@
+// Logo + optional app name mark (shared by mobile header and desktop sidebar).
+.brand-logo {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 0.8rem;
+
+    &__img {
+        flex: none;
+    }
+
+    &__badge {
+        flex: none;
+    }
+
+    &__text {
+        color: var(--text-general, inherit);
+        font-weight: 600;
+        font-size: 1.6rem;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 180px;
+    }
+}
+
+// Mobile header: keep the logo only — name is desktop-only (sidebar) to avoid
+// crowding next to the account controls. Matches bot's "desktop only" product copy.
+.header__logo .brand-logo__text {
+    display: none;
+}
+
+// Desktop sidebar has room for the name when show_name / preview showAppName is on.
+.sidebar__header .brand-logo__text {
+    display: block;
+    max-width: 140px;
+}

@@ -1,0 +1,373 @@
+const DerivAPIBasic = require('@deriv/deriv-api/dist/DerivAPIBasic');
+const { getCompleteWebSocketURL, getAccountId, cloneObject, State } = require('@deriv/shared');
+const SocketCache = require('./socket_cache');
+const APIMiddleware = require('./api_middleware');
+
+/*
+ * An abstraction layer over native javascript WebSocket,
+ * which provides additional functionality like
+ * reopen the closed connection and process the buffered requests
+ */
+const BinarySocketBase = (() => {
+    let deriv_api, binary_socket, client_store;
+
+    let config = {};
+    let is_disconnect_called = false;
+    let is_connected_before = false;
+    let is_switching_socket = false;
+    let opening_connection = null; // in-flight openNewConnection, or null
+    let reconnect_handlers = []; // Array to store multiple reconnection handlers
+    let reconnect_attempt_count = 0; // Track number of reconnect attempts
+
+    // White-label OAuth bridge: resolving the URL is now a round-trip (the
+    // one-time authenticated URL is minted per attempt — see
+    // src/utils/otp-ws.ts), so this is async and `openNewConnection` awaits it.
+    const getSocketUrl = async (is_mock_server = false) => {
+        if (is_mock_server) {
+            return 'ws://127.0.0.1:42069';
+        }
+
+        return getCompleteWebSocketURL();
+    };
+
+    const isReady = () => hasReadyState(1);
+
+    const isClose = () => !binary_socket || hasReadyState(2, 3);
+
+    const blockRequest = value => deriv_api?.blockRequest(value);
+
+    const close = () => {
+        // Opening the socket now awaits a minted URL, so there are windows —
+        // an attempt still in flight, or a mint that failed outright — with no
+        // socket at all. `close()` is reachable in both from the `offline`
+        // listener, `cleanUp()` and an account switch, and throwing there would
+        // take the caller down with it (deriv-api-v2#782).
+        binary_socket?.close();
+    };
+
+    const closeAndOpenNewConnection = async () => {
+        // Let an in-flight open settle before closing. It was started for the
+        // account selected at the time, and the re-entrancy guard below would
+        // otherwise turn this call into a no-op — leaving an account switch
+        // connected to the previous account.
+        if (opening_connection) await opening_connection;
+
+        close();
+        is_switching_socket = true;
+        await openNewConnection();
+    };
+
+    const hasReadyState = (...states) => binary_socket && states.some(s => binary_socket.readyState === s);
+
+    const init = ({ options, client }) => {
+        if (typeof options === 'object' && config !== options) {
+            config = options;
+        }
+        client_store = client;
+    };
+
+    const getMockServerConfig = () => {
+        const mock_server_config = localStorage.getItem('mock_server_data');
+        return mock_server_config
+            ? JSON.parse(mock_server_config)
+            : {
+                  session_id: '',
+                  is_mockserver_enabled: false,
+              };
+    };
+
+    // Shared by the socket's own `error` events and by a failed mint. A mint
+    // that throws never gets as far as constructing a socket, so it never
+    // reaches the `error` listener below; without feeding the same threshold
+    // itself, a persistently failing mint retries forever in silence while the
+    // user stares at a blank screen (deriv-api-v2#782).
+    const reportConnectionError = error => {
+        reconnect_attempt_count++;
+
+        // Throw error after 3 reconnect attempts
+        if (reconnect_attempt_count >= 3 && typeof config.onConnectionError === 'function') {
+            config.onConnectionError(error);
+            reconnect_attempt_count = 0; // Reset counter after throwing error
+        }
+    };
+
+    const openNewConnection = () => {
+        // Resolving the URL now awaits a network round-trip, so two triggers
+        // (the 5s reconnect timer and the `online` listener) can both clear
+        // isClose() while the first mint is still in flight and open two
+        // sockets. Sharing the in-flight attempt is what stops them.
+        if (opening_connection) return opening_connection;
+
+        opening_connection = (async () => {
+            try {
+                await openConnection();
+            } catch (error) {
+                // The three callers deliberately do not await this, so a
+                // rejection here would surface as an unhandled rejection.
+                // Report it and let the existing reconnect schedule take the
+                // retry — connecting with a credential-less URL instead is the
+                // bug this replaced.
+                // eslint-disable-next-line no-console
+                console.error('Failed to open a WebSocket connection:', error);
+                reportConnectionError(error);
+                // `close` is what schedules the retry (network_monitor_base's
+                // reconnectAfter), so it is fired last: the reconnect predicate
+                // has to see the failed attempt's final state.
+                config.wsEvent('close');
+            } finally {
+                opening_connection = null;
+            }
+        })();
+
+        return opening_connection;
+    };
+
+    const openConnection = async () => {
+        const mock_server_config = getMockServerConfig();
+        const session_id = mock_server_config?.session_id || '';
+
+        if (!is_switching_socket) config.wsEvent('init');
+
+        if (isClose()) {
+            const socket_url = await getSocketUrl(session_id);
+
+            is_disconnect_called = false;
+            binary_socket = new WebSocket(socket_url);
+
+            // Add error event listener for connection failures
+            binary_socket.addEventListener('error', error_event => {
+                // eslint-disable-next-line no-console
+                console.error('WebSocket error:', error_event);
+
+                reportConnectionError(error_event);
+            });
+
+            deriv_api = new DerivAPIBasic({
+                connection: binary_socket,
+                storage: SocketCache,
+                middleware: new APIMiddleware(config),
+            });
+        }
+
+        deriv_api.onOpen().subscribe(() => {
+            config.wsEvent('open');
+
+            // Reset reconnect attempt counter on successful connection
+            reconnect_attempt_count = 0;
+
+            // Remove automatic authorization - server handles it via account_id
+            // Balance subscription will serve as auth confirmation
+            const account_id = getAccountId();
+
+            if (account_id) {
+                // Only reset authorization state on initial connection, not on reconnection
+                // On reconnection, user is still logged in and is_authorize should remain true
+                // This allows stores' reaction() to work correctly on reconnection
+                if (client_store && !is_connected_before) {
+                    client_store.setIsAuthorize(false);
+                }
+
+                // Subscribe to balance immediately - this also confirms authorization
+                subscribeBalance();
+
+                // Call all reconnection handlers on reconnection (same timing as old system)
+                // Subscriptions will be queued by deriv-api until authorization completes
+                if (is_connected_before && reconnect_handlers.length > 0) {
+                    reconnect_handlers.forEach(handler => {
+                        if (typeof handler === 'function') {
+                            handler();
+                        }
+                    });
+                }
+            }
+
+            if (typeof config.onOpen === 'function') {
+                config.onOpen(isReady());
+            }
+
+            if (!is_connected_before) {
+                is_connected_before = true;
+            }
+        });
+
+        deriv_api.onMessage().subscribe(({ data: response }) => {
+            const msg_type = response.msg_type;
+            State.set(['response', msg_type], cloneObject(response));
+
+            config.wsEvent('message');
+
+            if (typeof config.onMessage === 'function') {
+                config.onMessage(response);
+            }
+        });
+
+        deriv_api.onClose().subscribe(() => {
+            if (!is_switching_socket) {
+                config.wsEvent('close');
+            } else {
+                is_switching_socket = false;
+            }
+
+            if (typeof config.onDisconnect === 'function' && !is_disconnect_called) {
+                config.onDisconnect();
+                is_disconnect_called = true;
+            }
+        });
+    };
+
+    const excludeAuthorize = type => !(type === 'authorize' && !client_store.is_logged_in);
+
+    const wait = (...responses) => deriv_api?.expectResponse(...responses.filter(excludeAuthorize));
+
+    const subscribe = (request, cb) => deriv_api.subscribe(request).subscribe(cb, cb); // Delegate error handling to the callback
+
+    const subscribeBalance = cb => subscribe({ balance: 1 }, cb);
+
+    const subscribeProposal = (req, cb) => subscribe({ proposal: 1, ...req }, cb);
+
+    const subscribeProposalOpenContract = (contract_id = null, cb) =>
+        subscribe({ proposal_open_contract: 1, ...(contract_id && { contract_id }) }, cb);
+
+    const subscribeTicks = (symbol, cb) => subscribe({ ticks: symbol }, cb);
+
+    const subscribeTicksHistory = (request_object, cb) => subscribe(request_object, cb);
+
+    const subscribeTransaction = cb => subscribe({ transaction: 1 }, cb);
+
+    const getTicksHistory = request_object => deriv_api.send(request_object);
+
+    const buy = ({ proposal_id, price }) => deriv_api.send({ buy: proposal_id, price });
+
+    const sell = (contract_id, bid_price) => deriv_api.send({ sell: contract_id, price: bid_price });
+
+    const profitTable = (limit, offset, date_boundaries) =>
+        deriv_api.send({ profit_table: 1, description: 1, limit, offset, ...date_boundaries });
+
+    const statement = (limit, offset, other_properties) =>
+        deriv_api.send({ statement: 1, description: 1, limit, offset, ...other_properties });
+
+    const activeSymbols = (mode = 'brief') => deriv_api.activeSymbols(mode);
+
+    const forgetStream = id => deriv_api.forget(id);
+
+    const contractUpdate = (contract_id, limit_order) =>
+        deriv_api.send({
+            contract_update: 1,
+            contract_id,
+            limit_order,
+        });
+
+    const contractUpdateHistory = contract_id =>
+        deriv_api.send({
+            contract_update_history: 1,
+            contract_id,
+        });
+
+    const cancelContract = contract_id => deriv_api.send({ cancel: contract_id });
+
+    return {
+        init,
+        openNewConnection,
+        forgetStream,
+        wait,
+        hasReadyState,
+        // Exposed for network_monitor_base's reconnect predicate: "no socket
+        // yet" and "socket closed" both mean "reconnect", and since the open is
+        // async the first state is now reachable (deriv-api-v2#782).
+        isClose,
+        getSocket: () => binary_socket,
+        get: () => deriv_api,
+        setOnDisconnect: onDisconnect => {
+            config.onDisconnect = onDisconnect;
+        },
+        setOnReconnect: onReconnect => {
+            // Add handler to array if it's not already there
+            if (typeof onReconnect === 'function' && !reconnect_handlers.includes(onReconnect)) {
+                reconnect_handlers.push(onReconnect);
+            }
+        },
+        removeOnReconnect: onReconnect => {
+            // If a specific handler is provided, remove only that one
+            if (typeof onReconnect === 'function') {
+                const index = reconnect_handlers.indexOf(onReconnect);
+                if (index > -1) {
+                    reconnect_handlers.splice(index, 1);
+                }
+            } else {
+                // If no handler provided, clear all handlers (backward compatibility)
+                reconnect_handlers = [];
+            }
+        },
+        removeOnDisconnect: () => {
+            delete config.onDisconnect;
+        },
+        cache: delegateToObject({}, () => deriv_api.cache),
+        storage: delegateToObject({}, () => deriv_api.storage),
+        blockRequest,
+        buy,
+        sell,
+        cancelContract,
+        close,
+        contractUpdate,
+        contractUpdateHistory,
+        profitTable,
+        statement,
+        getTicksHistory,
+        activeSymbols,
+        subscribeBalance,
+        subscribeProposal,
+        subscribeProposalOpenContract,
+        subscribeTicks,
+        subscribeTicksHistory,
+        subscribeTransaction,
+        closeAndOpenNewConnection,
+    };
+})();
+
+function delegateToObject(base_obj, extending_obj_getter) {
+    return new Proxy(base_obj, {
+        get(target, field) {
+            if (target[field]) return target[field];
+
+            const extending_obj =
+                typeof extending_obj_getter === 'function' ? extending_obj_getter() : extending_obj_getter;
+
+            if (!extending_obj) return undefined;
+
+            const value = extending_obj[field];
+            if (value) {
+                if (typeof value === 'function') {
+                    return value.bind(extending_obj);
+                }
+                return value;
+            }
+
+            return undefined;
+        },
+    });
+}
+
+const proxied_socket_base = delegateToObject(BinarySocketBase, () => BinarySocketBase.get());
+
+const proxyForAuthorize = obj =>
+    new Proxy(obj, {
+        get(target, field) {
+            if (target[field] && typeof target[field] !== 'function') {
+                return proxyForAuthorize(target[field]);
+            }
+            return (...args) => {
+                // Wait for balance response instead of authorize (balance serves as auth confirmation)
+                const account_id = getAccountId();
+                if (account_id) {
+                    // Wait for balance (which confirms authorization)
+                    return BinarySocketBase?.wait('balance')?.then(() => target[field](...args));
+                }
+                // Not logged in, execute without waiting
+                return target[field](...args);
+            };
+        },
+    });
+
+BinarySocketBase.authorized = proxyForAuthorize(proxied_socket_base);
+
+module.exports = proxied_socket_base;

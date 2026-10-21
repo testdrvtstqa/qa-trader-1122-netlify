@@ -1,0 +1,182 @@
+/** @define sidebar */
+.sidebar {
+    height: 100vh;
+    // The rail is 7.2rem of usable space PLUS the 1px divider. With border-box
+    // sizing, `width: 7.2rem` + `border-right` would leave only 71px of content,
+    // so nav items (56px + 8px margins) could not sit evenly: the odd pixel made
+    // the gap 8px on the left and 7px on the right. Adding the border's width
+    // back keeps the content box an even 72px and the divider outside it, so the
+    // items and the header logo share one axis at 36 with symmetric gaps.
+    width: calc(7.2rem + 1px);
+    min-width: calc(7.2rem + 1px);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--color-nav-bg);
+    border-right: 1px solid var(--color-nav-border);
+    transition: opacity 0.3s;
+    backface-visibility: hidden;
+
+    @include mobile-screen {
+        display: none; // Hide sidebar on mobile
+    }
+
+    &--highlighted {
+        z-index: 10001;
+        position: relative;
+    }
+
+    &__header {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 6.4rem;
+        padding: 1.6rem;
+    }
+
+    &__nav {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        padding: 0 0 1.6rem;
+        justify-content: space-between;
+    }
+
+    &__nav-main {
+        display: flex;
+        flex-direction: column;
+    }
+
+    &__separator {
+        height: 1px;
+        margin: 0 0.8rem 0.8rem;
+        background-color: var(--color-surface-border);
+    }
+
+    &__nav-utility {
+        display: flex;
+        flex-direction: column;
+    }
+
+    &__item {
+        height: 7.2rem;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 0.8rem 0;
+        margin: 0 0.8rem;
+        border: none;
+        border-radius: 0.8rem;
+        background-color: transparent;
+        color: var(--color-text-secondary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        outline: none;
+
+        // Upstream DTrader used the legacy Button, whose flagless variant has no
+        // hover background. Here the same component adapts to quill-ui's Button,
+        // which defaults to the `tertiary` colour and *does* paint one — so the
+        // 56x72 button tinted on hover behind the 40x40 icon highlight below,
+        // showing two overlapping shapes. Only the icon should light up. The
+        // `:not(:disabled)` matches quill's own selector specificity
+        // (.quill__color--tertiary-black-white:hover:not(:disabled)), which a
+        // plain `&:hover` loses to.
+        &:hover:not(:disabled) {
+            background-color: transparent;
+        }
+
+        // The highlight goes on the icon's ::before, not the icon box itself:
+        // that box now spans the full wrapper width (see &__item-icon) so the
+        // glyph can centre, and painting on it directly would stretch the
+        // square into a 51px slab for long labels like "Positions".
+        &:hover .sidebar__item-icon::before {
+            background-color: var(--color-nav-item-hover);
+        }
+
+        &--active {
+            .sidebar__item-label {
+                color: var(--color-nav-item-active);
+            }
+        }
+
+        .dc-btn__text {
+            flex-direction: column;
+            align-items: center;
+        }
+    }
+
+    &__item-icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 4rem;
+        // The icon and label are siblings inside quill's <p> wrapper, which
+        // shrink-wraps to its widest child. A label wider than the icon (labels
+        // are `nowrap`, so "Positions" is ~51px vs the icon's 40px) made that
+        // wrapper wider than 4rem, and the icon — a block-level child — sat at
+        // its left edge, pulling the glyph off-centre by half the difference.
+        // Filling the wrapper and centring inside it keeps the glyph on the
+        // sidebar's axis whatever the label says.
+        width: 100%;
+        min-width: 4rem;
+        align-self: stretch;
+        position: relative;
+
+        // Fixed 4rem square that carries the hover highlight, centred behind the
+        // glyph and independent of this box's text-driven width.
+        &::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4rem;
+            height: 4rem;
+            border-radius: 0.8rem;
+            background-color: transparent;
+            transition: background-color 0.2s ease;
+        }
+
+        // Keep the glyph above the highlight.
+        > * {
+            position: relative;
+        }
+    }
+
+    &__item-badge {
+        position: absolute;
+        top: 0.4rem;
+        right: 0rem;
+        width: 2rem;
+        height: 2rem;
+        padding: 0 4px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9.6rem;
+        background-color: var(--color-status-danger);
+        color: var(--color-text-white);
+        font-size: var(--text-size-xxxs);
+        font-weight: bold;
+        line-height: 1;
+    }
+
+    &__item-label {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: var(--text-size-xxs);
+    }
+
+    &__tooltip {
+        .dc-popover__bubble {
+            margin-left: 0.8rem;
+        }
+    }
+
+    &__hidden {
+        display: none;
+    }
+}

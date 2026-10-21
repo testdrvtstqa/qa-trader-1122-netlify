@@ -1,0 +1,105 @@
+.purchase-button {
+    flex-direction: column-reverse;
+    padding-block: var(--core-spacing-400);
+    align-items: flex-end;
+    height: var(--core-size-2800);
+    gap: 0;
+
+    &:not(.quill-button:first-child .purchase-button):not(.purchase-button--loading) {
+        align-items: flex-start;
+    }
+    &--single {
+        align-items: center;
+        justify-content: center;
+
+        .purchase-button__information__wrapper {
+            justify-content: center;
+            gap: var(--core-spacing-400);
+        }
+    }
+    &--loading {
+        align-items: center;
+    }
+
+    &__information {
+        &__wrapper {
+            width: 100%;
+            display: inline-flex;
+            justify-content: space-between;
+            align-items: center;
+
+            &--reverse {
+                flex-direction: row-reverse;
+            }
+
+            &--disabled-placeholder {
+                min-height: var(--core-size-900);
+            }
+        }
+
+        // Scope under the wrapper to raise specificity to (0,2,0) so this beats
+        // quill's equal-specificity `.quill-typography__color--prominent` rule
+        // regardless of stylesheet load order. Without this, navigating to Reports
+        // re-injects quill's base2.css after the trader CSS, flipping the cascade
+        // and turning the payout text black in light theme.
+        &__wrapper &__item {
+            color: var(--component-button-label-color-sell-primary);
+        }
+    }
+
+    &__wrapper {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: var(--core-spacing-400);
+        width: 100%;
+        z-index: 2; // chart has z-index: 1, it should not push purchase buttons down
+        bottom: var(--core-spacing-2800);
+        border-radius: 100px;
+
+        @include mobile-screen {
+            padding: var(--core-spacing-400) 0;
+        }
+
+        &__un-auth {
+            bottom: var(--core-spacing-50);
+        }
+        &.slide {
+            &-enter {
+                transform: translateY(100%);
+            }
+            &-enter-active {
+                transform: translateY(0);
+                transition: transform 150ms ease-in-out 300ms;
+            }
+            &-exit {
+                transform: translateY(0);
+            }
+            &-exit-active {
+                transform: translateY(100%);
+                transition: transform 150ms ease-in-out 300ms;
+            }
+        }
+
+        .quill-button {
+            border-radius: 28px;
+        }
+    }
+
+    &__skeleton {
+        width: 100%;
+    }
+
+    // Allow long translations of "Review risk disclosure" to wrap.
+    &--review-disclosure {
+        height: auto !important;
+        min-height: 4.8rem;
+        padding-block: 0.8rem !important;
+        text-align: center;
+
+        .quill-button-label {
+            text-wrap: wrap !important;
+            white-space: normal !important;
+        }
+    }
+}

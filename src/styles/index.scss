@@ -1,0 +1,70 @@
+// Global style entry for the trader template.
+//
+// Branding model (single mechanism): the partner colour/font/name live in
+// brand.config.json (written by the App Builder BFF at deploy time) and are
+// applied AT RUNTIME by src/utils/apply-branding.ts, scoped to the app chrome
+// (header/sidebar/bottom nav). The tokens below are only static, brand-neutral
+// defaults — nothing rewrites this file at build time.
+:root {
+    --text-align-center: center;
+
+    /* Champion stock brand tokens (partner colour is chrome-scoped at runtime) */
+    --brand-white: #ffffff;
+    --brand-dark-grey: #0f172a;
+    --brand-red-coral: #ff444f;
+    --brand-orange: #8b5cf6;
+    --brand-primary: #ff444f;
+    --brand-secondary: #64748b;
+    --brand-tertiary: #8b5cf6;
+    --brand-success: #10b981;
+    --brand-danger: #ef4444;
+    --brand-warning: #f59e0b;
+    --brand-info: #0ea5e9;
+    --brand-neutral: #6b7280;
+
+    /* Font defaults — the runtime overrides --brand-font-primary with the partner font */
+    --brand-font-primary: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --brand-font-secondary: Georgia, 'Times New Roman', Times, serif;
+    --brand-font-monospace: 'Courier New', Courier, monospace;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+/* Full-height chain down to the mount node — upstream DTrader mounts into a
+   full-height root. Without it, .app-contents--is-dtrader-v2's
+   height: calc(100% - header) resolves to auto, and pages laid out with
+   absolutely-positioned children (e.g. /menu) collapse to 0 and get clipped. */
+html,
+body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    font-family: var(--brand-font-primary, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+}
+
+/* Legacy Button renders through quill-ui's Button (components/button). Quill's
+   tertiary variant is link-styled (underlined); legacy flagless/tertiary
+   buttons never were — every adapter-rendered button carries .dc-btn. */
+.dc-btn {
+    text-decoration: none !important;
+}
+
+.trader-boot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-size: 1.6rem;
+    opacity: 0.7;
+}
+
+/* The vendored DTrader layout gives .app-contents a 56px top margin to sit
+   below the absolute-positioned header. Without a block formatting context on
+   the mount node, that margin collapses through to <body>, shifting the whole
+   app down 56px and exposing a black strip above the header. */
+#derivatives_trader {
+    display: flow-root;
+    height: 100%;
+}

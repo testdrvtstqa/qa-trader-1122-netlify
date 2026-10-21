@@ -1,0 +1,228 @@
+.trade {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: calc(100vw - 7.2rem);
+    padding-left: 0;
+    transition: padding-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+    background-color: var(--semantic-color-slate-solid-surface-frame-mid);
+
+    @include mobile-screen {
+        height: unset;
+        width: unset;
+        padding: 0 var(--core-spacing-400) var(--core-spacing-400);
+        gap: var(--core-spacing-400);
+    }
+
+    &--flyout-open {
+        @include desktop-screen {
+            padding-left: 32rem;
+        }
+
+        @include tablet-screen {
+            padding-left: 32rem;
+        }
+    }
+
+    &__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 6.5rem;
+        padding-right: 1.6rem;
+        background-color: var(--semantic-color-slate-solid-surface-frame-mid);
+        position: relative;
+
+        &:after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 28rem;
+            width: 5.6rem;
+            height: 100%;
+            // background: linear-gradient(to right, transparent, var(--semantic-color-slate-solid-surface-frame-low));
+            pointer-events: none;
+            z-index: 1;
+
+            @include mobile-screen {
+                display: none;
+            }
+        }
+    }
+    &__logout {
+        .trade__header:after {
+            right: 10rem;
+        }
+
+        .trade__trade-types {
+            width: calc(100vw - 7.2rem - 10rem);
+        }
+    }
+    &__grid {
+        display: grid;
+        grid-template-columns: 1fr minmax(0, 28rem) 4.8rem;
+        grid-template-rows: minmax(0, 1fr);
+        position: relative;
+        height: calc(100vh - 6.4rem);
+        gap: var(--core-spacing-400);
+        padding: var(--core-spacing-400);
+        padding-top: 0;
+    }
+
+    &__trade-types {
+        position: relative;
+        width: calc(100vw - 7.2rem - 28rem);
+        padding-right: 5.6rem;
+        // No padding-inline-start here: the sticky selector pins to the content-box
+        // origin, so any leading padding would be a band it can't cover, and chips
+        // scrolling through it would bleed out to the left of the divider. The
+        // selector supplies that inset via its own padding instead.
+        display: flex;
+        align-items: center;
+        gap: var(--core-spacing-400);
+        overflow-x: auto;
+        min-height: var(--core-spacing-1600);
+        white-space: nowrap;
+        scrollbar-width: none;
+        scroll-behavior: smooth;
+
+        // Restricted accounts don't render the sticky grid selector, so the first
+        // chip would otherwise sit flush against the sidebar. Add a matching left
+        // padding to keep it visually aligned with the rest of the trade header.
+        &--restricted {
+            padding-inline-start: var(--core-spacing-800);
+        }
+
+        @include mobile-screen {
+            width: 100vw;
+            inset-inline-start: calc(-1 * var(--core-spacing-400));
+            padding: var(--core-spacing-400) var(--core-spacing-800);
+        }
+
+        &::-webkit-scrollbar {
+            display: none;
+        }
+
+        button:not(.trade-types-selector__button):not(.trade-types-selector__guide-button):not(
+                .trade-types-selector__item
+            ) {
+            background-color: var(--semantic-color-slate-solid-surface-frame-low);
+            cursor: pointer;
+
+            // Outlined selected state — transparent fill, prominent border
+            // and text. Shared by manual trading and the automate tab.
+            &.quill-chip[data-state='selected'] {
+                background-color: transparent !important;
+                border-color: var(--component-textIcon-normal-prominent) !important;
+
+                > p {
+                    color: var(--component-textIcon-normal-prominent) !important;
+                }
+            }
+        }
+
+        &-header {
+            margin: auto 0;
+        }
+    }
+    &__assets {
+        padding: 0 var(--core-spacing-800);
+
+        .dc-dropdown {
+            &__container {
+                width: 26rem;
+            }
+            &__display {
+                height: var(--core-spacing-2100);
+            }
+        }
+    }
+    &__chart {
+        direction: ltr;
+        overflow: hidden;
+        touch-action: none;
+
+        @include mobile-screen {
+            border-top-left-radius: var(--core-borderRadius-400);
+            border-top-right-radius: var(--core-borderRadius-400);
+            &--with-borderRadius {
+                border-bottom-left-radius: var(--core-borderRadius-400);
+                border-bottom-right-radius: var(--core-borderRadius-400);
+            }
+        }
+
+        &-tooltip {
+            position: relative;
+            background-color: var(--semantic-color-slate-solid-surface-frame-low);
+            border-radius: var(--core-borderRadius-400);
+            overflow: hidden;
+
+            @include mobile-screen {
+                position: unset;
+                background-color: unset;
+                border-radius: unset;
+                overflow: unset;
+            }
+        }
+
+        .smartcharts {
+            position: relative;
+        }
+    }
+    &__market-selector-guide {
+        display: flex;
+        justify-content: space-between;
+    }
+    &__guide {
+        height: 3.2rem;
+        width: 3.2rem;
+        border-radius: 1.6rem;
+        padding: unset;
+        background-color: var(--semantic-color-monochrome-surface-normal-lowest);
+    }
+    &__parameter {
+        min-height: 7.2rem;
+        background-color: var(--semantic-color-slate-solid-surface-frame-low);
+
+        &:has(.trade-params__options__wrapper--horizontal:not(:only-child)) {
+            min-height: 10.4rem;
+        }
+    }
+}
+
+// Pre-automation layout for when automation is unavailable (EU/DIEL). The
+// `automation-enabled` class is toggled by `useIsAutomationEnabled` once the
+// account status is known; the base rules above are the automation-on state.
+body:not(.automation-enabled) {
+    .trade {
+        background-color: transparent;
+    }
+
+    .trade__header {
+        background-color: var(--semantic-color-slate-solid-surface-frame-low);
+        border-bottom: 1px solid var(--semantic-color-monochrome-border-normal-mid);
+    }
+
+    .trade__grid {
+        grid-template-columns: 1fr minmax(0, 28rem);
+        grid-template-rows: unset;
+        gap: unset;
+        padding: unset;
+    }
+}
+
+.quill-action-sheet--portal--wrapper:has(.trade-types-dialog--is_editing) {
+    overflow-y: hidden;
+}
+.trade-types-dialog {
+    &__title {
+        margin: var(--core-spacing-1200) var(--core-spacing-50);
+    }
+    &__content {
+        padding-top: var(--core-spacing-50);
+    }
+    &--is_editing {
+        overflow: hidden;
+    }
+}

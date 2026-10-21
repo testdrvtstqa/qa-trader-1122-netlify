@@ -1,0 +1,56 @@
+{
+    "compilerOptions": {
+        "target": "ES2021",
+        "useDefineForClassFields": true,
+        "lib": ["ES2021", "DOM", "DOM.Iterable"],
+        "module": "ESNext",
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": false,
+        "moduleResolution": "bundler",
+        "allowImportingTsExtensions": true,
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "noEmit": true,
+        "jsx": "react-jsx",
+        "strict": false,
+        "noUnusedLocals": false,
+        "noUnusedParameters": false,
+        "noFallthroughCasesInSwitch": true,
+        "allowJs": true,
+        "baseUrl": "./src",
+        "paths": {
+            "@/*": ["./*"],
+            "Stores/*": ["./stores/*"],
+
+            "@deriv/core/src/*": ["./vendor/core/*"],
+            "@deriv/trader/src/*": ["./vendor/trader/*"],
+            "@deriv/reports/src/*": ["./vendor/reports/*"],
+            "@deriv/shared/src/*": ["./vendor/shared/*"],
+            "@deriv/stores/src/*": ["./vendor/stores/*"],
+            "@deriv/components/src/*": ["./*"],
+            "@deriv/api/src/*": ["./vendor/api/*"],
+            "@deriv/utils/src/*": ["./vendor/utils/*"],
+
+            "@deriv/core": ["./vendor/core"],
+            "@deriv/trader": ["./vendor/trader"],
+            "@deriv/reports": ["./vendor/reports"],
+            "@deriv/shared": ["./vendor/shared"],
+            "@deriv/stores": ["./vendor/stores"],
+            "@deriv/stores/types": ["./vendor/stores/types.ts"],
+            "@deriv/stores/*": ["./vendor/stores/*"],
+            "@deriv/api/types": ["./vendor/api/types.ts"],
+            "@deriv-com/quill-ui/dist/types": ["../node_modules/@deriv-com/quill-ui/dist/types.d.ts"],
+            "@deriv/components": ["./components"],
+            "@deriv/api": ["./vendor/api"],
+            "@deriv/utils": ["./vendor/utils"],
+
+            "@core/*": ["./vendor/core/*"],
+            "@trader/*": ["./vendor/trader/*"],
+            "@reports/*": ["./vendor/reports/*"]
+        },
+        "esModuleInterop": true,
+        "types": ["jest", "node", "@testing-library/jest-dom"]
+    },
+    "include": ["src"],
+    "exclude": ["src/utils/tmp"]
+}

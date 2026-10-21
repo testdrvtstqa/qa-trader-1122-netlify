@@ -1,0 +1,101 @@
+import React, { useEffect, useMemo } from 'react';
+
+import { dayjs, toMoment, useIsMounted } from '@deriv/shared';
+import { DatePicker } from '@deriv-com/quill-ui';
+
+import { ContractType } from '@trader/Stores/Modules/Trading/Helpers/contract-type';
+import { useTraderStore } from '@trader/Stores/useTraderStores';
+
+import { getEarlyCloseTileContent, TMarketEvent } from './early-close-dot';
+
+const DaysDatepicker = ({
+    start_date,
+    end_date,
+    setEndDate,
+}: {
+    start_date: Date;
+    setEndDate: (arg: Date) => void;
+    end_date: Date;
+}) => {
+    const [disabled_days, setDisabledDays] = React.useState<number[]>([]);
+    const [market_events, setMarketEvents] = React.useState<TMarketEvent[]>([]);
+    const { symbol } = useTraderStore();
+    const isMounted = useIsMounted();
+
+    const onChangeCalendarMonth = React.useCallback(
+        async (e = toMoment().format('YYYY-MM-DD')) => {
+            const new_market_events: TMarketEvent[] = [];
+            let new_disabled_days: number[] = [];
+
+            const [events, trading_days] = await Promise.all([
+                ContractType.getTradingEvents(e, symbol),
+                ContractType.getTradingDays(e, symbol),
+            ]);
+
+            if (trading_days) {
+                const all_days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+                new_disabled_days = all_days
+                    .map((day: (typeof all_days)[number], index) => (!trading_days.includes(day) ? index : -1))
+                    .filter(index => index !== -1);
+            }
+
+            events?.forEach((evt: { dates: string; descrip: string }) => {
+                const dates = evt.dates.split(', ');
+                new_market_events.push({
+                    dates,
+                    descrip: evt.descrip,
+                });
+            });
+
+            if (isMounted()) {
+                setDisabledDays(new_disabled_days);
+                setMarketEvents(new_market_events);
+            }
+        },
+        [isMounted, symbol]
+    );
+
+    const tileContent = useMemo(() => getEarlyCloseTileContent(market_events), [market_events]);
+
+    const handleActiveStartDateChange = React.useCallback(
+        ({ activeStartDate }: { activeStartDate: Date | null }) => {
+            if (activeStartDate) {
+                onChangeCalendarMonth(dayjs(activeStartDate).format('YYYY-MM-DD'));
+            }
+        },
+        [onChangeCalendarMonth]
+    );
+
+    useEffect(() => {
+        onChangeCalendarMonth();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const getDisabledDays = ({ date }: { date: Date }) => {
+        const day = date.getDay();
+        return disabled_days.includes(day);
+    };
+    return (
+        <div className='duration-datepicker duration-container__date-picker'>
+            <DatePicker
+                className='date-picker'
+                hasFixedWidth={false}
+                minDate={new Date(start_date)}
+                maxDate={new Date(new Date().setFullYear(new Date().getFullYear() + 1))}
+                view='month'
+                value={end_date}
+                tileDisabled={getDisabledDays}
+                tileContent={tileContent}
+                onActiveStartDateChange={handleActiveStartDateChange}
+                onChange={date => {
+                    if (date && date instanceof Date) {
+                        setEndDate(date);
+                    }
+                }}
+                wrapperClassName='duration-container__date-picker__sheet'
+            />
+        </div>
+    );
+};
+
+export default DaysDatepicker;

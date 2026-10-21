@@ -1,0 +1,94 @@
+import React, { useMemo } from 'react';
+import { toJS } from 'mobx';
+
+import { FastMarker } from '@trader/Modules/SmartChart';
+
+type TContentConfig = {
+    className?: string;
+    label?: string;
+    line_style?: string;
+    spot_className?: string;
+};
+
+export type TMarkerContentConfig = TContentConfig & {
+    align_label?: string;
+    is_value_hidden?: boolean;
+    marker_config?: {
+        [key: string]: {
+            type: string;
+            marker_config: {
+                ContentComponent: React.ComponentType<TMarkerContentConfig> | string;
+                className?: string;
+            };
+            content_config: TContentConfig;
+        };
+    };
+    spot_epoch?: string;
+    spot_count?: number;
+    spot_profit?: string;
+    spot_value?: string;
+    status?: string;
+};
+
+type TChartMarker = {
+    marker_config: {
+        ContentComponent: React.ComponentType<TMarkerContentConfig> | string;
+        className?: string;
+        x: string | number;
+        y: string | number | null;
+    };
+    marker_content_props: TMarkerContentConfig;
+    is_positioned_behind?: boolean;
+    is_positioned_before?: boolean;
+};
+type TRef = {
+    setPosition: (position: { epoch: number | null; price: number | null }) => void;
+    div: HTMLDivElement;
+};
+
+const ChartMarker = ({
+    marker_config,
+    marker_content_props,
+    is_positioned_behind = false,
+    is_positioned_before = false,
+}: TChartMarker) => {
+    const { ContentComponent, ...marker_props } = marker_config;
+
+    // Convert MobX observable to plain object on every render to ensure fresh data
+    // (marker_content_props reference may be stable while internal data changes)
+    const contentProps = toJS(marker_content_props);
+
+    // Memoize onRef callback to prevent recreation
+    const onRef = React.useCallback(
+        (ref?: TRef) => {
+            if (ref) {
+                // NOTE: null price means vertical line.
+                if (!marker_props.y) {
+                    const margin = 24; // height of line marker icon
+
+                    ref.div.style.height = `calc(100% - ${margin}px)`;
+                } else {
+                    ref.div.style.zIndex = '1';
+                }
+                if (is_positioned_behind) ref.div.style.zIndex = '-1';
+                if (is_positioned_before) ref.div.style.zIndex = '102';
+                ref.setPosition({
+                    epoch: +marker_props.x,
+                    price: Number(marker_props.y),
+                });
+            }
+        },
+        [marker_props.x, marker_props.y, is_positioned_behind, is_positioned_before]
+    );
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const Component = useMemo(() => ContentComponent, []);
+
+    return (
+        <FastMarker markerRef={onRef}>
+            <Component {...contentProps} />
+        </FastMarker>
+    );
+};
+
+export default ChartMarker;
